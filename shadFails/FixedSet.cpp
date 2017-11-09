@@ -21,6 +21,8 @@ private:
 std::vector<int> ReadVector(std::istream &in);
 
 struct Hash {
+    explicit Hash(std::mt19937 &generator) : Hash(generator(), generator()) {}
+
     explicit Hash(size_t multiplier_value = 0, size_t adder_value = 0);
 
     size_t operator()(int value) const;
@@ -31,23 +33,7 @@ private:
     static const size_t kPrimeNumber = 2000000011;
 };
 
-class HashFactory {
-public:
-    static HashFactory &Instance();
-
-    explicit HashFactory(HashFactory const &) = delete;
-
-    HashFactory &operator=(HashFactory const &) = delete;
-
-    Hash GetNextHash();
-
-private:
-    HashFactory();
-
-    std::mt19937 random_generator_;
-};
-
-template<typename T, typename Hash, typename HashFactory>
+template<typename T, typename Hash>
 class FixedSet {
 public:
     FixedSet() : inner_data_size_(0), is_initialized_(false) {}
@@ -74,35 +60,35 @@ private:
     Hash hash_;
 };
 
-template<typename T, typename Hash, typename HashFactory>
-class PerfectHashFirstLevelHashTable : public FixedSet<T, Hash, HashFactory> {
+template<typename T, typename Hash>
+class PerfectHashFirstLevelHashTable : public FixedSet<T, Hash> {
 private:
     std::vector<Optional<T>> inner_data_;
 
-    void InitBufferAndSize(size_t size) override;
+    void InitBufferAndSize(size_t size) final;
 
-    bool HasKey(const T &value) const override;
+    bool HasKey(const T &value) const final;
 
-    bool TryFillingHashTable(const std::vector<T> &data) override;
+    bool TryFillingHashTable(const std::vector<T> &data) final;
 };
 
 
-template<typename T, typename Hash, typename HashFactory>
-class PerfectHashTable : public FixedSet<T, Hash, HashFactory> {
+template<typename T, typename Hash>
+class PerfectHashTable : public FixedSet<T, Hash> {
 private:
-    std::vector<PerfectHashFirstLevelHashTable<T, Hash, HashFactory>> hashTable_;
+    std::vector<PerfectHashFirstLevelHashTable<T, Hash>> hashTable_;
 
-    void InitBufferAndSize(size_t size) override;
+    void InitBufferAndSize(size_t size) final;
 
-    bool HasKey(const T &value) const override;
+    bool HasKey(const T &value) const final;
 
-    bool TryFillingHashTable(const std::vector<T> &data) override;
+    bool TryFillingHashTable(const std::vector<T> &data) final;
 
     size_t kMemoryRepletionRatio = 4;
 };
 
 void OperateQueries(const std::vector<int> &queries,
-                    const PerfectHashTable<int, Hash, HashFactory> &static_hash_table);
+                    const PerfectHashTable<int, Hash> &static_hash_table);
 
 int main() {
     std::ios_base::sync_with_stdio(false);
@@ -110,7 +96,7 @@ int main() {
 
     auto data = ReadVector(std::cin);
     auto queries = ReadVector(std::cin);
-    PerfectHashTable<int, Hash, HashFactory> static_hash_table;
+    PerfectHashTable<int, Hash> static_hash_table;
     static_hash_table.Initialize(data);
     OperateQueries(queries, static_hash_table);
     return 0;
@@ -142,17 +128,6 @@ size_t Hash::operator()(int value) const {
     return (value * multiplier_value + adder_valuer) % kPrimeNumber;
 }
 
-HashFactory &HashFactory::Instance() {
-    static HashFactory hashFactory;
-    return hashFactory;
-}
-
-Hash HashFactory::GetNextHash() {
-    return Hash(random_generator_(), random_generator_());
-}
-
-HashFactory::HashFactory() { random_generator_.seed(42); }
-
 std::vector<int> ReadVector(std::istream &in) {
     size_t size;
     in >> size;
@@ -164,7 +139,7 @@ std::vector<int> ReadVector(std::istream &in) {
 }
 
 void OperateQueries(const std::vector<int> &queries,
-                    const PerfectHashTable<int, Hash, HashFactory> &static_hash_table) {
+                    const PerfectHashTable<int, Hash> &static_hash_table) {
     for (auto value: queries) {
         if (static_hash_table.Contains(value)) {
             std::cout << "Yes\n";
@@ -174,19 +149,19 @@ void OperateQueries(const std::vector<int> &queries,
     }
 }
 
-template<typename T, typename Hash, typename HashFactory>
-void FixedSet<T, Hash, HashFactory>::Initialize(std::vector<T> data) {
+template<typename T, typename Hash>
+void FixedSet<T, Hash>::Initialize(std::vector<T> data) {
     InitBufferAndSize(data.size());
-    HashFactory &hashFactory = HashFactory::Instance();
-    hash_ = hashFactory.GetNextHash();
+    std::mt19937 random_generator;
+    hash_ = Hash(random_generator);
     while (!TryFillingHashTable(data)) {
-        hash_ = hashFactory.GetNextHash();
+        hash_ = Hash(random_generator);
     }
     is_initialized_ = true;
 }
 
-template<typename T, typename Hash, typename HashFactory>
-bool FixedSet<T, Hash, HashFactory>::Contains(const T &value) const {
+template<typename T, typename Hash>
+bool FixedSet<T, Hash>::Contains(const T &value) const {
     assert(is_initialized_);
     if (inner_data_size_ == 0) {
         return false;
@@ -194,13 +169,13 @@ bool FixedSet<T, Hash, HashFactory>::Contains(const T &value) const {
     return HasKey(value);
 }
 
-template<typename T, typename Hash, typename HashFactory>
-size_t FixedSet<T, Hash, HashFactory>::CalcInnerPosition(const T &value) const {
+template<typename T, typename Hash>
+size_t FixedSet<T, Hash>::CalcInnerPosition(const T &value) const {
     return hash_(value) % inner_data_size_;
 }
 
-template<typename T, typename Hash, typename HashFactory>
-std::vector<size_t> FixedSet<T, Hash, HashFactory>::CalcDistribution(const std::vector<T> &data) {
+template<typename T, typename Hash>
+std::vector<size_t> FixedSet<T, Hash>::CalcDistribution(const std::vector<T> &data) {
     std::vector<size_t> baskets(inner_data_size_, 0);
     for (auto value : data) {
         ++baskets[CalcInnerPosition(value)];
@@ -208,20 +183,20 @@ std::vector<size_t> FixedSet<T, Hash, HashFactory>::CalcDistribution(const std::
     return baskets;
 }
 
-template<typename T, typename Hash, typename HashFactory>
-void PerfectHashFirstLevelHashTable<T, Hash, HashFactory>::InitBufferAndSize(size_t size) {
+template<typename T, typename Hash>
+void PerfectHashFirstLevelHashTable<T, Hash>::InitBufferAndSize(size_t size) {
     this->inner_data_size_ = size * size;
     inner_data_.resize(this->inner_data_size_);
 }
 
-template<typename T, typename Hash, typename HashFactory>
-bool PerfectHashFirstLevelHashTable<T, Hash, HashFactory>::HasKey(const T &value) const {
+template<typename T, typename Hash>
+bool PerfectHashFirstLevelHashTable<T, Hash>::HasKey(const T &value) const {
     auto optional_value = inner_data_[this->CalcInnerPosition(value)];
     return optional_value.IsAssigned() && optional_value.GetValue() == value;
 }
 
-template<typename T, typename Hash, typename HashFactory>
-bool PerfectHashFirstLevelHashTable<T, Hash, HashFactory>::TryFillingHashTable(
+template<typename T, typename Hash>
+bool PerfectHashFirstLevelHashTable<T, Hash>::TryFillingHashTable(
         const std::vector<T> &data) {
     auto distribution = this->CalcDistribution(data);
     for (auto num : distribution) {
@@ -236,19 +211,19 @@ bool PerfectHashFirstLevelHashTable<T, Hash, HashFactory>::TryFillingHashTable(
 }
 
 
-template<typename T, typename Hash, typename HashFactory>
-void PerfectHashTable<T, Hash, HashFactory>::InitBufferAndSize(size_t size) {
+template<typename T, typename Hash>
+void PerfectHashTable<T, Hash>::InitBufferAndSize(size_t size) {
     this->inner_data_size_ = size;
     hashTable_.resize(this->inner_data_size_);
 }
 
-template<typename T, typename Hash, typename HashFactory>
-bool PerfectHashTable<T, Hash, HashFactory>::HasKey(const T &value) const {
+template<typename T, typename Hash>
+bool PerfectHashTable<T, Hash>::HasKey(const T &value) const {
     return hashTable_[this->CalcInnerPosition(value)].Contains(value);
 }
 
-template<typename T, typename Hash, typename HashFactory>
-bool PerfectHashTable<T, Hash, HashFactory>::TryFillingHashTable(const std::vector<T> &data) {
+template<typename T, typename Hash>
+bool PerfectHashTable<T, Hash>::TryFillingHashTable(const std::vector<T> &data) {
     auto distribution = this->CalcDistribution(data);
     size_t sum_size = 0;
     for (auto &number: distribution) {
@@ -272,3 +247,4 @@ bool PerfectHashTable<T, Hash, HashFactory>::TryFillingHashTable(const std::vect
         return true;
     }
 }
+
